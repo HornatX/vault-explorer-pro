@@ -5,8 +5,14 @@
 我在小红书发布了许多obsidian的教程和插件开发进度，你的关注就是对我最大的支持
 
 一站式侧边栏增强，让你的文件管理更高效。
+文件价文件折叠
 <p align="center">
   <img src="assets/演示.gif" alt="演示" />
+</p>
+
+文件夹快捷图标
+<p align="center">
+  <img src="assets/演示2.gif" alt="演示2" />
 </p>
 
 [简体中文](#简体中文) | [用法](#用法) | [English](#english) | [Usage](#usage)
