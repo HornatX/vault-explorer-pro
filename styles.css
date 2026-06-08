@@ -1,0 +1,404 @@
+/* ========================================================
+   [AutoSource] 核心变量定义区
+======================================================== */
+:root {
+    --auto-source-icon-plus: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' y1='5' x2='12' y2='19'/%3E%3Cline x1='5' y1='12' x2='19' y2='12'/%3E%3C/svg%3E");
+    --auto-source-icon-minus: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='5' y1='12' x2='19' y2='12'/%3E%3C/svg%3E");
+}
+
+/* ========================================================
+   [AutoSource] 设置面板专用排版
+======================================================== */
+.auto-source-setting-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    align-items: center;
+}
+
+.auto-source-flex-2 {
+    flex: 2;
+}
+
+.auto-source-flex-1 {
+    flex: 1;
+}
+
+/* ========================================================
+   一、 [SuperShortcuts] 文件夹快捷方式 UI 与排版
+======================================================== */
+.folder-shortcut-container {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    gap: 4px;
+    padding-right: 6px;
+    height: 100% !important;
+}
+
+.folder-shortcut-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 4px;
+    width: 24px !important;
+    height: 24px !important;
+    border-radius: var(--radius-s);
+    transition: background-color 0.15s ease;
+}
+
+.folder-shortcut-icon:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.folder-shortcut-icon svg {
+    width: 16px !important;
+    height: 16px !important;
+    display: block;
+}
+
+.folder-shortcut-icon.is-broken {
+    color: var(--text-error) !important;
+    opacity: 0.8;
+}
+
+.folder-shortcut-icon.is-broken:hover {
+    background-color: var(--background-modifier-error-hover);
+}
+
+.nav-folder:not(.is-collapsed)>.tree-item-self>.folder-shortcut-container {
+    display: none;
+}
+
+.is-locked-folder .tree-item-inner {
+    opacity: 0.65;
+    pointer-events: none;
+}
+
+.is-locked-folder:hover {
+    background-color: var(--background-modifier-hover) !important;
+}
+
+.is-locked-folder .folder-shortcut-container {
+    pointer-events: auto;
+    cursor: default;
+}
+
+.is-locked-folder .tree-item-self {
+    position: relative;
+}
+
+.is-locked-folder .tree-item-icon.collapse-icon {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    z-index: 2;
+}
+
+.is-locked-folder .tree-item-self::before {
+    content: '';
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    bottom: 0;
+    left: 0px;
+    width: 28px;
+}
+
+.tree-item-self {
+    --nav-item-height: 32px;
+    font-size: 16px !important;
+    align-items: center !important;
+    min-height: var(--nav-item-height) !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+.tree-item-icon.collapse-icon {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    height: 100% !important;
+    width: 16px !important;
+}
+
+.tree-item-inner {
+    display: flex !important;
+    align-items: center !important;
+    height: 100% !important;
+    line-height: 1 !important;
+    flex: 1;
+}
+
+/* ========================================================
+   二、 [SuperShortcuts] 文件附属内联快捷方式 UI 与排版
+======================================================== */
+.nav-file.is-hidden-subfile {
+    display: none !important;
+}
+
+.nav-file-title {
+    display: flex;
+    align-items: center;
+}
+
+.nav-file-title-content {
+    flex-shrink: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-inline-shortcut-container {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: 6px;
+    flex-shrink: 0;
+}
+
+.file-inline-shortcut-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 2px;
+    width: 20px !important;
+    height: 20px !important;
+    border-radius: var(--radius-s);
+    transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.file-inline-shortcut-icon:hover {
+    background-color: var(--background-modifier-hover);
+    transform: scale(1.1);
+}
+
+.file-inline-shortcut-icon svg {
+    width: 14px !important;
+    height: 14px !important;
+    display: block;
+}
+
+.file-inline-shortcut-icon.is-broken {
+    color: var(--text-error) !important;
+    opacity: 0.8;
+}
+
+/* ========================================================
+   三、 [SuperShortcuts] 统一的设置面板 Modal UI
+======================================================== */
+.fs-shortcut-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 15px;
+}
+
+.fs-shortcut-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px;
+    background-color: transparent;
+    border-radius: var(--radius-m);
+    transition: background-color 0.2s ease;
+    cursor: grab;
+}
+
+.fs-shortcut-item:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+.fs-shortcut-item:active {
+    cursor: grabbing;
+}
+
+.fs-shortcut-item.is-dragging {
+    opacity: 0.4;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    background-color: var(--background-primary);
+}
+
+.fs-shortcut-item.drag-over {
+    background-color: var(--background-modifier-active-hover);
+    transform: scale(1.01);
+}
+
+.fs-file-select-btn {
+    cursor: default;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    min-width: 120px;
+    background-color: var(--background-primary);
+    border: 1px solid transparent;
+    text-align: left;
+    padding: 6px 10px;
+    border-radius: var(--radius-s);
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: pointer;
+    color: var(--text-normal);
+}
+
+.fs-file-select-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+
+.fs-file-select-btn::after {
+    content: '▼';
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 8px;
+    pointer-events: none;
+}
+
+.fs-file-select-btn:hover {
+    border: 1px solid var(--background-modifier-border);
+}
+
+.fs-icon-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer !important;
+    border-radius: var(--radius-s);
+    background-color: transparent;
+    transition: background-color 0.2s;
+}
+
+.fs-icon-btn:hover {
+    background-color: var(--background-modifier-active-hover);
+}
+
+.fs-color-picker {
+    -webkit-appearance: none;
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer !important;
+    padding: 0;
+    background: none;
+    box-shadow: 0 0 0 1px var(--background-modifier-border);
+}
+
+.fs-color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.fs-color-picker::-webkit-color-swatch {
+    border: none;
+    border-radius: 50%;
+}
+
+.fs-btn-action {
+    background-color: transparent !important;
+    box-shadow: none !important;
+    padding: 6px 8px !important;
+    cursor: pointer !important;
+    opacity: 0.7;
+    transition: all 0.2s;
+    border-radius: var(--radius-s);
+}
+
+.fs-btn-action:hover {
+    opacity: 1;
+}
+
+.fs-btn-reset-color {
+    color: var(--text-muted) !important;
+}
+
+.fs-btn-reset-color:hover {
+    background-color: var(--background-modifier-hover) !important;
+    color: var(--text-normal) !important;
+}
+
+.fs-btn-delete {
+    color: var(--text-error) !important;
+}
+
+.fs-btn-delete:hover {
+    background-color: var(--background-modifier-error-hover) !important;
+}
+
+/* ========================================================
+   四、 手机端适配与全局样式
+======================================================== */
+.is-mobile input[type="color"].fs-color-picker,
+.is-mobile input[type="color"] {
+    -webkit-appearance: none;
+    /* 必须放在标准 appearance 之前避免警告 */
+    appearance: none;
+    width: 32px !important;
+    height: 32px !important;
+    padding: 0 !important;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 50% !important;
+    background: none !important;
+    overflow: hidden;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.is-mobile input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0 !important;
+}
+
+.is-mobile input[type="color"]::-webkit-color-swatch {
+    border: none !important;
+    border-radius: 50% !important;
+}
+
+.custom-file-badge {
+    margin-left: 6px;
+    font-size: 0.65em;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+    opacity: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+    pointer-events: none;
+    transition: opacity 0.15s ease-in-out;
+}
+
+.nav-file-title:hover .custom-file-badge {
+    opacity: 1;
+}
+
+.ffs__actions-container.nav-header {
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+}
+
+.ffs__actions-container.nav-header:hover {
+    opacity: 1;
+}
+
+.nn-file.nn-selected .nn-file-content::before {
+    /* 修复：使用Obsidian CSS变量替代硬编码颜色 */
+    background-color: var(--background-modifier-border);
+}
+
+.nn-file.nn-slim.nn-selected .nn-file-name {
+    /* 修复：使用Obsidian CSS变量替代硬编码颜色 */
+    color: var(--text-accent) !important;
+}
+
+.vertical-tab-content-container input[type="text"],
+.vertical-tab-content-container textarea {
+    /* 修复：使用Obsidian CSS变量替代硬编码颜色 */
+    background-color: var(--background-primary) !important; 
+    
+    
+    /* 文字颜色：确保看得很清楚 */
+    color: var(--text-normal) !important; 
+}
