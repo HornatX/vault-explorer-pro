@@ -16,7 +16,9 @@ import {
     Setting,
     MarkdownView,
     TextComponent,
-    ButtonComponent
+    TextAreaComponent,
+    ButtonComponent,
+    WorkspaceLeaf
 } from 'obsidian';
 
 // ==========================================
@@ -106,13 +108,11 @@ export default class UltimateExplorerPlugin extends Plugin {
     settings: CombinedSettings;
     
     // --- SuperShortcuts 引擎变量 ---
-    // 修复：使用 CSSStyleSheet 替代 HTMLStyleElement
     private hiddenSheet: CSSStyleSheet | null = null;
     private autoSourceSheet: CSSStyleSheet | null = null;
     private originalSheets: CSSStyleSheet[] = [];
     domObservers: Map<string, MutationObserver> = new Map();
     
-    // 修复 1：使用正确的函数类型替代 any
     debouncedUpdate: () => void;
     debouncedSave: () => void;
     
@@ -123,7 +123,6 @@ export default class UltimateExplorerPlugin extends Plugin {
     expandedLimits: Set<string> = new Set();
     autoSourceClickHandler: (e: MouseEvent) => void;
     
-    // 修复 2：添加内存泄漏防护
     private _isUnloading = false;
     private _timeouts: Set<ReturnType<typeof window.setTimeout>> = new Set();
 
@@ -132,7 +131,6 @@ export default class UltimateExplorerPlugin extends Plugin {
 
         this.addSettingTab(new CombinedSettingTab(this.app, this));
 
-        // 修复：使用 adoptedStyleSheets 替代 createElement('style')
         this.originalSheets = [...activeDocument.adoptedStyleSheets];
         this.hiddenSheet = new CSSStyleSheet();
         this.autoSourceSheet = new CSSStyleSheet();
@@ -146,13 +144,14 @@ export default class UltimateExplorerPlugin extends Plugin {
             this.updateAllFiles();
         }, 150, true);
         
-        this.debouncedSave = debounce(async () => {
-            await this.saveData(this.settings);
+        this.debouncedSave = debounce(() => {
+            void this.saveData(this.settings);
         }, 500, true);
 
         // 注册拦截器 (SuperShortcuts)
         this.shortcutClickHandler = (e: MouseEvent) => {
-            const target = e.target as HTMLElement;
+            const target = e.target instanceof HTMLElement ? e.target : null;
+            if (!target) return;
             const titleEl = target.closest('.is-locked-folder');
             if (!titleEl) return;
             const folderNode = titleEl.closest('.nav-folder');
@@ -173,20 +172,21 @@ export default class UltimateExplorerPlugin extends Plugin {
 
         // 注册拦截器 (AutoSource)
         this.autoSourceClickHandler = (e: MouseEvent) => {
-            const target = e.target as HTMLElement | null;
+            const target = e.target instanceof HTMLElement ? e.target : null;
             if (!target) return;
-            const titleEl = target.closest('.nav-file-title') as HTMLElement | null;
+            const titleEl = target.closest('.nav-file-title');
             if (!titleEl) return;
             const rect = titleEl.getBoundingClientRect();
             if (e.clientX < rect.right - 35) return; 
 
-            const fileEl = titleEl.closest('.nav-file') as HTMLElement | null;
+            const fileEl = titleEl.closest('.nav-file');
             if (!fileEl) return;
             const childrenContainer = fileEl.parentElement;
             if (!childrenContainer || !childrenContainer.classList.contains('nav-folder-children')) return;
             const folderEl = childrenContainer.parentElement;
             if (!folderEl) return;
-            const folderTitle = folderEl.querySelector(':scope > .nav-folder-title') as HTMLElement | null;
+            
+            const folderTitle = (folderEl as HTMLElement).find(':scope > .nav-folder-title');
             if (!folderTitle) return;
 
             const path = folderTitle.getAttribute('data-path');
@@ -225,7 +225,7 @@ export default class UltimateExplorerPlugin extends Plugin {
                     const isLocked = this.settings.lockedFolders[file.path];
                     menu.addItem((item) => {
                         item.setTitle(isLocked ? '解锁文件夹' : '锁定文件夹').setIcon(isLocked ? 'unlock' : 'lock')
-                            .onClick(async () => {
+                            .onClick(() => {
                                 if (isLocked) {
                                     delete this.settings.lockedFolders[file.path];
                                     this.forceToggleFolderNode(file.path, true);
@@ -235,7 +235,7 @@ export default class UltimateExplorerPlugin extends Plugin {
                                     this.forceToggleFolderNode(file.path, false);
                                     new Notice(`已锁定: ${file.name}`);
                                 }
-                                await this.saveSettings();
+                                void this.saveSettings();
                             });
                     });
                 }
@@ -266,9 +266,9 @@ export default class UltimateExplorerPlugin extends Plugin {
                         if (this._isUnloading) return;
                         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
                         if (activeView && activeView.containerEl) {
-                            const metadataContainer = activeView.containerEl.querySelector('.metadata-container');
+                            const metadataContainer = activeView.containerEl.find('.metadata-container');
                             if (metadataContainer && !metadataContainer.classList.contains('is-collapsed')) {
-                                const heading = metadataContainer.querySelector('.metadata-properties-heading') as HTMLElement | null;
+                                const heading = metadataContainer.find('.metadata-properties-heading');
                                 if (heading) heading.click();
                             }
                         }
@@ -287,27 +287,37 @@ export default class UltimateExplorerPlugin extends Plugin {
 
         this.registerEvent(this.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
             let isSettingsUpdated = false;
-            const updatePathLogic = (oldObj: any, isFolderDict: boolean) => {
-                const newObj: any = {};
-                for (let [keyPath, value] of Object.entries(oldObj)) {
+            
+            const updateFolderDict = (oldObj: Record<string, boolean>): Record<string, boolean> => {
+                const newObj: Record<string, boolean> = {};
+                for (const [keyPath, value] of Object.entries(oldObj)) {
                     let newKeyPath = keyPath;
                     if (keyPath === oldPath) { newKeyPath = file.path; isSettingsUpdated = true; } 
                     else if (keyPath.startsWith(oldPath + "/")) { newKeyPath = file.path + keyPath.substring(oldPath.length); isSettingsUpdated = true; }
-
-                    if (isFolderDict) newObj[newKeyPath] = value;
-                    else {
-                        newObj[newKeyPath] = (value as Shortcut[]).map(sc => {
-                            if (sc.path === oldPath) { isSettingsUpdated = true; return { ...sc, path: file.path }; } 
-                            else if (sc.path.startsWith(oldPath + "/")) { isSettingsUpdated = true; return { ...sc, path: file.path + sc.path.substring(oldPath.length) }; }
-                            return sc;
-                        });
-                    }
+                    newObj[newKeyPath] = value;
                 }
                 return newObj;
             };
-            this.settings.shortcuts = updatePathLogic(this.settings.shortcuts, false);
-            this.settings.lockedFolders = updatePathLogic(this.settings.lockedFolders, true);
-            this.settings.inlineShortcuts = updatePathLogic(this.settings.inlineShortcuts, false);
+
+            const updateShortcutDict = (oldObj: Record<string, Shortcut[]>): Record<string, Shortcut[]> => {
+                const newObj: Record<string, Shortcut[]> = {};
+                for (const [keyPath, value] of Object.entries(oldObj)) {
+                    let newKeyPath = keyPath;
+                    if (keyPath === oldPath) { newKeyPath = file.path; isSettingsUpdated = true; } 
+                    else if (keyPath.startsWith(oldPath + "/")) { newKeyPath = file.path + keyPath.substring(oldPath.length); isSettingsUpdated = true; }
+                    
+                    newObj[newKeyPath] = value.map(sc => {
+                        if (sc.path === oldPath) { isSettingsUpdated = true; return { ...sc, path: file.path }; } 
+                        else if (sc.path.startsWith(oldPath + "/")) { isSettingsUpdated = true; return { ...sc, path: file.path + sc.path.substring(oldPath.length) }; }
+                        return sc;
+                    });
+                }
+                return newObj;
+            };
+
+            this.settings.shortcuts = updateShortcutDict(this.settings.shortcuts);
+            this.settings.lockedFolders = updateFolderDict(this.settings.lockedFolders);
+            this.settings.inlineShortcuts = updateShortcutDict(this.settings.inlineShortcuts);
 
             if (isSettingsUpdated) { this.updateDynamicHiddenStyles(); this.debouncedSave(); }
             this.debouncedUpdate();
@@ -319,7 +329,7 @@ export default class UltimateExplorerPlugin extends Plugin {
             if (this.settings.lockedFolders[file.path]) { delete this.settings.lockedFolders[file.path]; isSettingsUpdated = true; }
             if (this.settings.inlineShortcuts[file.path]) { delete this.settings.inlineShortcuts[file.path]; isSettingsUpdated = true; }
 
-            const cleanMainKeys = (obj: Record<string, any>) => {
+            const cleanMainKeys = (obj: Record<string, unknown>) => {
                 for (const key in obj) { if (key.startsWith(file.path + "/")) { delete obj[key]; isSettingsUpdated = true; } }
             };
             cleanMainKeys(this.settings.shortcuts); cleanMainKeys(this.settings.lockedFolders); cleanMainKeys(this.settings.inlineShortcuts);
@@ -353,30 +363,24 @@ export default class UltimateExplorerPlugin extends Plugin {
     }
 
     onunload() {
-        // 修复 3：设置卸载标志，防止异步操作继续执行
         this._isUnloading = true;
         
-        // 清理所有定时器
         this._timeouts.forEach(t => window.clearTimeout(t));
         this._timeouts.clear();
         
-        // 修复：恢复原始样式表
         activeDocument.adoptedStyleSheets = this.originalSheets;
         this.hiddenSheet = null;
         this.autoSourceSheet = null;
         
-        // 修复 4：清理所有事件监听器
         activeDocument.removeEventListener('click', this.shortcutClickHandler, true);
         activeDocument.removeEventListener('dblclick', this.shortcutClickHandler, true);
         activeDocument.removeEventListener('click', this.autoSourceClickHandler, true);
         
-        // 清理MutationObserver
         this.domObservers.forEach(observer => observer.disconnect());
         this.domObservers.clear();
         
-        // 清理DOM元素
-        activeDocument.querySelectorAll('.folder-shortcut-container, .file-inline-shortcut-container').forEach(el => el.remove());
-        activeDocument.querySelectorAll('.is-locked-folder').forEach(el => el.classList.remove('is-locked-folder'));
+        activeDocument.body.findAll('.folder-shortcut-container, .file-inline-shortcut-container').forEach(el => el.remove());
+        activeDocument.body.findAll('.is-locked-folder').forEach(el => el.classList.remove('is-locked-folder'));
     }
 
     async loadSettings() {
@@ -479,20 +483,19 @@ export default class UltimateExplorerPlugin extends Plugin {
             const leaf = view.leaf; const state = leaf.getViewState();
             if (state.type !== 'markdown') return;
 
-            // 修复 5：使用更安全的方式访问配置
-            const vault = this.app.vault as Record<string, unknown>;
-            const getConfig = vault.getConfig as ((key: string) => unknown) | undefined;
-            const defaultViewMode = (getConfig?.('defaultViewMode') as string) || 'source';
-            const livePreview = getConfig?.('livePreview');
+            interface VaultConfig { getConfig?(key: string): unknown; }
+            const vault = this.app.vault as unknown as VaultConfig;
+            const defaultViewMode = (typeof vault.getConfig === 'function' ? vault.getConfig('defaultViewMode') : 'source') as string;
+            const livePreview = typeof vault.getConfig === 'function' ? vault.getConfig('livePreview') : true;
             
             let targetMode = forceSource ? 'source' : defaultViewMode;
             let targetSource = forceSource ? true : (livePreview === false);
 
             let changed = false;
-            const mdState = state.state as Record<string, unknown>;
+            const mdState = state.state as { mode?: string; source?: boolean };
             if (mdState.mode !== targetMode) { mdState.mode = targetMode; changed = true; }
             if (mdState.source !== targetSource) { mdState.source = targetSource; changed = true; }
-            if (changed) leaf.setViewState(state, { ephemeral: true });
+            if (changed) void leaf.setViewState(state, { ephemeral: true });
         }, 50);
         this._timeouts.add(timeout);
     }
@@ -500,7 +503,8 @@ export default class UltimateExplorerPlugin extends Plugin {
     forceToggleFolderNode(folderPath: string, expand: boolean) {
         const fileExplorers = this.app.workspace.getLeavesOfType('file-explorer');
         fileExplorers.forEach(leaf => {
-            const titles = (leaf.view as ItemView).containerEl.querySelectorAll('.nav-folder-title') as NodeListOf<HTMLElement>;
+            if (!(leaf.view instanceof ItemView)) return;
+            const titles = leaf.view.containerEl.findAll('.nav-folder-title');
             for (let i = 0; i < titles.length; i++) {
                 if (titles[i].dataset.path === folderPath) {
                     const parent = titles[i].parentElement;
@@ -522,12 +526,17 @@ export default class UltimateExplorerPlugin extends Plugin {
         if (file instanceof TFile) {
             const cache = this.app.metadataCache.getFileCache(file);
             if (cache?.frontmatter) {
-                if (cache.frontmatter.icon) icon = cache.frontmatter.icon;
-                if (cache.frontmatter.iconColor) color = cache.frontmatter.iconColor;
+                if (typeof cache.frontmatter['icon'] === 'string') icon = cache.frontmatter['icon'];
+                if (typeof cache.frontmatter['iconColor'] === 'string') color = cache.frontmatter['iconColor'];
             }
         }
-        const iconize = (this.app as any).plugins.getPlugin('obsidian-icon-folder');
-        if (iconize?.data?.[path]) {
+        
+        interface IconPlugin {
+            data?: Record<string, string | { iconName?: string; iconColor?: string }>;
+        }
+        const app = this.app as App & { plugins: { getPlugin(id: string): IconPlugin | null } };
+        const iconize = app.plugins.getPlugin('obsidian-icon-folder');
+        if (iconize?.data && iconize.data[path]) {
             const data = iconize.data[path];
             if (typeof data === 'string') icon = data;
             else if (typeof data === 'object') {
@@ -542,26 +551,26 @@ export default class UltimateExplorerPlugin extends Plugin {
         el.empty(); if (!iconName) iconName = 'file';
         let hasRendered = false;
         try {
-            const app = this.app as Record<string, unknown>;
-            const plugins = app.plugins as { getPlugin: (id: string) => Record<string, unknown> | null } | undefined;
-            const iconize = plugins?.getPlugin('obsidian-icon-folder');
+            interface IconPlugin {
+                api?: { getIconByName(name: string): { svgElement?: string } | null };
+            }
+            const app = this.app as App & { plugins: { getPlugin(id: string): IconPlugin | null } };
+            const iconize = app.plugins.getPlugin('obsidian-icon-folder');
             if (iconize?.api) {
-                const api = iconize.api as { getIconByName: (name: string) => { svgElement?: string } | null };
-                const iconObj = api.getIconByName(iconName);
+                const iconObj = iconize.api.getIconByName(iconName);
                 if (iconObj?.svgElement) {
-                    // 修复：使用 DOMParser 替代 innerHTML
                     const parser = new DOMParser();
                     const doc = parser.parseFromString(iconObj.svgElement, 'image/svg+xml');
-                    const svg = doc.querySelector('svg');
+                    const svg = doc.getElementsByTagName('svg')[0];
                     if (svg) {
                         svg.style.width = isInline ? '14px' : '16px';
                         svg.style.height = isInline ? '14px' : '16px';
-                        el.appendChild(document.adoptNode(svg));
+                        el.appendChild(activeDocument.adoptNode(svg));
                         hasRendered = true;
                     }
                 }
             }
-        } catch (_e) { /* iconize plugin not available */ }
+        } catch { /* iconize plugin not available */ }
 
         if (!hasRendered) {
             setIcon(el, iconName);
@@ -579,26 +588,30 @@ export default class UltimateExplorerPlugin extends Plugin {
         for (const folderPath of Object.keys(this.settings.lockedFolders)) activeFolderPaths.add(folderPath);
 
         fileExplorers.forEach(leaf => {
-            const containerEl = (leaf.view as ItemView).containerEl;
-            containerEl.querySelectorAll('.folder-shortcut-container').forEach(container => {
-                const path = (container as HTMLElement).dataset.fsPath;
+            if (!(leaf.view instanceof ItemView)) return;
+            const containerEl = leaf.view.containerEl;
+            containerEl.findAll('.folder-shortcut-container').forEach(container => {
+                const path = container.dataset.fsPath;
                 if (path && (!this.settings.shortcuts[path] || this.settings.shortcuts[path].length === 0)) container.remove();
             });
-            containerEl.querySelectorAll('.is-locked-folder').forEach(title => {
-                const path = (title as HTMLElement).dataset.path;
+            containerEl.findAll('.is-locked-folder').forEach(title => {
+                const path = title.dataset.path;
                 if (path && !this.settings.lockedFolders[path]) title.classList.remove('is-locked-folder');
             });
 
             const folderNodesMap = new Map<string, HTMLElement>();
-            const titleNodes = containerEl.querySelectorAll('.nav-folder-title') as NodeListOf<HTMLElement>;
-            for (let i = 0; i < titleNodes.length; i++) { const path = titleNodes[i].dataset.path; if (path) folderNodesMap.set(path, titleNodes[i]); }
+            const titleNodes = containerEl.findAll('.nav-folder-title');
+            for (let i = 0; i < titleNodes.length; i++) { 
+                const path = titleNodes[i].dataset.path; 
+                if (path) folderNodesMap.set(path, titleNodes[i]); 
+            }
 
             activeFolderPaths.forEach(folderPath => {
                 const titleEl = folderNodesMap.get(folderPath); if (!titleEl) return;
                 if (this.settings.lockedFolders[folderPath]) titleEl.classList.add('is-locked-folder');
 
                 const shortcuts = this.settings.shortcuts[folderPath]; if (!shortcuts || shortcuts.length === 0) return;
-                const existingContainer = titleEl.querySelector('.folder-shortcut-container') as HTMLElement;
+                const existingContainer = titleEl.find('.folder-shortcut-container');
                 const stateToTrack = shortcuts.map(sc => ({ ...sc, isBroken: !this.app.vault.getAbstractFileByPath(sc.path) }));
                 const currentStateStr = JSON.stringify(stateToTrack);
 
@@ -622,16 +635,17 @@ export default class UltimateExplorerPlugin extends Plugin {
                         this.renderIconSafe(iconEl, sc.icon || "file", false);
                     }
 
-                    const openFile = async (e: MouseEvent | KeyboardEvent) => {
+                    const openFile = (e: MouseEvent | KeyboardEvent) => {
                         e.preventDefault(); e.stopPropagation();
                         if (targetFile instanceof TFile) {
-                            const isMiddleClick = e.type === 'auxclick' && (e as MouseEvent).button === 1;
+                            const isMiddleClick = e.type === 'auxclick' && 'button' in e && e.button === 1;
                             const openInNewTab = isMiddleClick || e.ctrlKey || e.metaKey;
                             if (!openInNewTab && this.app.workspace.getActiveFile()?.path === targetFile.path) return;
-                            await this.app.workspace.getLeaf(openInNewTab ? 'tab' : false).openFile(targetFile);
+                            void this.app.workspace.getLeaf(openInNewTab ? 'tab' : false).openFile(targetFile);
                         } else new Notice("无法打开：文件不存在或已被移动！");
                     };
-                    iconEl.addEventListener('click', openFile); iconEl.addEventListener('auxclick', openFile);
+                    iconEl.addEventListener('click', openFile); 
+                    iconEl.addEventListener('auxclick', openFile);
                     iconEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') openFile(e); });
                     container.appendChild(iconEl);
                 });
@@ -645,18 +659,19 @@ export default class UltimateExplorerPlugin extends Plugin {
         if (fileExplorers.length === 0) return;
 
         fileExplorers.forEach(leaf => {
-            const containerEl = (leaf.view as ItemView).containerEl;
-            containerEl.querySelectorAll('.file-inline-shortcut-container').forEach(container => {
-                const path = (container as HTMLElement).dataset.fsPath;
+            if (!(leaf.view instanceof ItemView)) return;
+            const containerEl = leaf.view.containerEl;
+            containerEl.findAll('.file-inline-shortcut-container').forEach(container => {
+                const path = container.dataset.fsPath;
                 if (path && (!this.settings.inlineShortcuts[path] || this.settings.inlineShortcuts[path].length === 0)) container.remove();
             });
 
             for (const [mainFilePath, shortcuts] of Object.entries(this.settings.inlineShortcuts)) {
                 if (!shortcuts || shortcuts.length === 0) continue;
-                const titleNode = containerEl.querySelector(`.nav-file-title[data-path="${CSS.escape(mainFilePath)}"]`); if (!titleNode) continue;
+                const titleNode = containerEl.find(`.nav-file-title[data-path="${CSS.escape(mainFilePath)}"]`); if (!titleNode) continue;
 
                 const currentStateStr = JSON.stringify(shortcuts.map(sc => ({ ...sc, isBroken: !this.app.vault.getAbstractFileByPath(sc.path) })));
-                const existingContainer = titleNode.querySelector('.file-inline-shortcut-container') as HTMLElement;
+                const existingContainer = titleNode.find('.file-inline-shortcut-container');
                 if (existingContainer && existingContainer.dataset.fsState === currentStateStr) continue;
                 if (existingContainer) existingContainer.remove();
 
@@ -677,18 +692,19 @@ export default class UltimateExplorerPlugin extends Plugin {
                         this.renderIconSafe(iconEl, sc.icon || "file", true);
                     }
 
-                    const openFile = async (e: MouseEvent) => {
+                    const openFile = (e: MouseEvent) => {
                         e.preventDefault(); e.stopPropagation();
                         if (targetFile instanceof TFile) {
                             const isMiddleClick = e.type === 'auxclick' && e.button === 1;
                             const openInNewTab = isMiddleClick || e.ctrlKey || e.metaKey;
-                            await this.app.workspace.getLeaf(openInNewTab ? 'tab' : false).openFile(targetFile);
+                            void this.app.workspace.getLeaf(openInNewTab ? 'tab' : false).openFile(targetFile);
                         } else new Notice("无法打开：附属文件不存在！");
                     };
-                    iconEl.addEventListener('click', openFile); iconEl.addEventListener('auxclick', openFile);
+                    iconEl.addEventListener('click', openFile); 
+                    iconEl.addEventListener('auxclick', openFile);
                     container.appendChild(iconEl);
                 });
-                const titleContent = titleNode.querySelector('.nav-file-title-content');
+                const titleContent = titleNode.find('.nav-file-title-content');
                 if (titleContent && titleContent.nextSibling) titleNode.insertBefore(container, titleContent.nextSibling);
                 else titleNode.appendChild(container);
             }
@@ -697,35 +713,33 @@ export default class UltimateExplorerPlugin extends Plugin {
 
     registerObservers() {
         const fileExplorerLeaves = this.app.workspace.getLeavesOfType('file-explorer');
-        // 修复 2：绕过 WorkspaceLeaf 缺少 id 的类型校验
-        const currentLeafIds = new Set(fileExplorerLeaves.map(leaf => (leaf as any).id));
+        const currentLeafIds = new Set(fileExplorerLeaves.map(leaf => (leaf as WorkspaceLeaf & { id: string }).id));
         for (const leafId of this.domObservers.keys()) {
             if (!currentLeafIds.has(leafId)) { this.domObservers.get(leafId)?.disconnect(); this.domObservers.delete(leafId); }
         }
 
         fileExplorerLeaves.forEach(leaf => {
-            const containerEl = (leaf.view as ItemView).containerEl;
-            const leafId = (leaf as any).id;
+            if (!(leaf.view instanceof ItemView)) return;
+            const containerEl = leaf.view.containerEl;
+            const leafId = (leaf as WorkspaceLeaf & { id: string }).id;
             if (!this.domObservers.has(leafId)) {
                 const uiObserver = new MutationObserver((mutations) => {
-                    // 修复 6：添加插件卸载状态检查
                     if (this._isUnloading) return;
                     let shouldUpdate = false;
                     for (let i = 0; i < mutations.length; i++) {
                         const m = mutations[i];
                         if (m.type === 'childList') {
                             for (let j = 0; j < m.addedNodes.length; j++) {
-                                const node = m.addedNodes[j] as HTMLElement;
-                                if (node.nodeType === Node.ELEMENT_NODE) {
-                                    if (node.classList && (node.classList.contains('folder-shortcut-container') || node.classList.contains('file-inline-shortcut-container'))) continue;
-                                    if (node.classList && (node.classList.contains('nav-folder') || node.classList.contains('nav-file'))) { shouldUpdate = true; break; }
-                                    if (node.querySelector && node.querySelector('.nav-folder-title')) { shouldUpdate = true; break; }
+                                const node = m.addedNodes[j];
+                                if (node instanceof HTMLElement) {
+                                    if (node.classList.contains('folder-shortcut-container') || node.classList.contains('file-inline-shortcut-container')) continue;
+                                    if (node.classList.contains('nav-folder') || node.classList.contains('nav-file')) { shouldUpdate = true; break; }
+                                    if (node.find && node.find('.nav-folder-title')) { shouldUpdate = true; break; }
                                 }
                             }
                         } else if (m.type === 'attributes' && m.attributeName === 'class') {
-                            const target = m.target as HTMLElement;
-                            // 【性能优化】：移除 nav-file 监听，避免点击文件高亮时触发全盘重新渲染
-                            if (target?.classList?.contains('nav-folder')) { shouldUpdate = true; break; }
+                            const target = m.target;
+                            if (target instanceof HTMLElement && target.classList.contains('nav-folder')) { shouldUpdate = true; break; }
                         }
                         if (shouldUpdate) break;
                     }
@@ -752,8 +766,8 @@ class FolderShortcutSettingModal extends Modal implements IShortcutSettingModal 
 
     constructor(app: App, plugin: UltimateExplorerPlugin, folder: TFolder) {
         super(app); this.plugin = plugin; this.folder = folder; this.folderPath = folder.path;
-        let savedShortcuts = this.plugin.settings.shortcuts[this.folderPath];
-        this.currentShortcuts = Array.isArray(savedShortcuts) ? JSON.parse(JSON.stringify(savedShortcuts)) : [];
+        const savedShortcuts = this.plugin.settings.shortcuts[this.folderPath];
+        this.currentShortcuts = Array.isArray(savedShortcuts) ? (JSON.parse(JSON.stringify(savedShortcuts)) as Shortcut[]) : [];
         this.setTitle(`文件夹快捷图标: ${this.folder.name}`);
     }
     onOpen() { this.display(); }
@@ -775,8 +789,8 @@ class FileShortcutSettingModal extends Modal implements IShortcutSettingModal {
 
     constructor(app: App, plugin: UltimateExplorerPlugin, file: TFile) {
         super(app); this.plugin = plugin; this.file = file; this.filePath = file.path;
-        let savedShortcuts = this.plugin.settings.inlineShortcuts[this.filePath];
-        this.currentShortcuts = Array.isArray(savedShortcuts) ? JSON.parse(JSON.stringify(savedShortcuts)) : [];
+        const savedShortcuts = this.plugin.settings.inlineShortcuts[this.filePath];
+        this.currentShortcuts = Array.isArray(savedShortcuts) ? (JSON.parse(JSON.stringify(savedShortcuts)) as Shortcut[]) : [];
         this.setTitle(`为主文件添加附属: ${this.file.name}`);
     }
     onOpen() { this.display(); }
@@ -800,8 +814,7 @@ function renderSettingModal(modalInstance: IShortcutSettingModal, cachedFiles: T
     const isFileModal = modalType === 'file';
     const descText = isFileModal ? '选择的附属文件将在左侧列表中隐藏，并紧贴在当前主文件名后。' : '按住列表即可上下拖拽排序。任何修改自动保存。';
     
-    // 修复 3：使用 CSS 类替代静态样式赋值
-    const pEl = contentEl.createEl('p', { text: descText, cls: 'setting-item-description setting-item-description-spaced' });
+    contentEl.createEl('p', { text: descText, cls: 'setting-item-description setting-item-description-spaced' });
 
     const listContainer = contentEl.createDiv('fs-shortcut-list');
     currentShortcuts.forEach((sc, index) => {
@@ -812,65 +825,74 @@ function renderSettingModal(modalInstance: IShortcutSettingModal, cachedFiles: T
         selectBtn.createEl('span', { text: currentFile ? currentFile.name : "文件已丢失(点击重选)" });
 
         const iconBtn = itemEl.createDiv('fs-icon-btn');
-        // 修复：使用 setProperty 替代直接赋值
         iconBtn.style.setProperty('color', sc.color || 'var(--text-normal)');
         plugin.renderIconSafe(iconBtn, sc.icon, isFileModal);
 
         selectBtn.onclick = () => {
             if (cachedFiles.length === 0) { new Notice("目录下没有更多可供挂载的文件了！"); return; }
-            new FilePickerModal(plugin.app, cachedFiles, async (selectedFile: TFile) => {
+            new FilePickerModal(plugin.app, cachedFiles, (selectedFile: TFile) => {
                 sc.path = selectedFile.path; const smartData = plugin.getSmartIconData(sc.path);
                 sc.icon = smartData.icon; if (smartData.color) sc.color = smartData.color; else delete sc.color;
-                await modalInstance.autoSave(); modalInstance.display();
+                void modalInstance.autoSave().then(() => modalInstance.display());
             }).open();
         };
 
         iconBtn.onclick = () => {
-            new IconPickerModal(plugin.app, async (selectedIcon: string) => {
-                sc.icon = selectedIcon; plugin.renderIconSafe(iconBtn, sc.icon, isFileModal); await modalInstance.autoSave();
+            new IconPickerModal(plugin.app, (selectedIcon: string) => {
+                sc.icon = selectedIcon; plugin.renderIconSafe(iconBtn, sc.icon, isFileModal); 
+                void modalInstance.autoSave();
             }).open();
         };
 
         const colorInput = itemEl.createEl('input', { cls: 'fs-color-picker', attr: { type: 'color', value: sc.color || '#808080' } });
-        colorInput.addEventListener('change', async (e: Event) => { sc.color = (e.target as HTMLInputElement).value; await modalInstance.autoSave(); });
+        colorInput.addEventListener('change', (e: Event) => { 
+            if (e.target instanceof HTMLInputElement) {
+                sc.color = e.target.value; 
+                void modalInstance.autoSave(); 
+            }
+        });
 
         const resetBtn = itemEl.createEl('button', { cls: 'fs-btn-action fs-btn-reset-color', attr: { 'aria-label': '重置为文件默认图标和颜色' } });
         setIcon(resetBtn, 'rotate-ccw');
-        resetBtn.onclick = async () => {
+        resetBtn.onclick = () => {
             if (!currentFile) { new Notice("无法重置：文件已丢失", 2000); return; }
             const smartData = plugin.getSmartIconData(sc.path); sc.icon = smartData.icon;
             if (smartData.color) sc.color = smartData.color; else delete sc.color;
-            new Notice(`已重置为最新图标和颜色`); await modalInstance.autoSave(); modalInstance.display();
+            new Notice(`已重置为最新图标和颜色`); 
+            void modalInstance.autoSave().then(() => modalInstance.display());
         };
 
         const delBtn = itemEl.createEl('button', { cls: 'fs-btn-action fs-btn-delete' });
         setIcon(delBtn, 'trash-2');
-        delBtn.onclick = async () => { currentShortcuts.splice(index, 1); await modalInstance.autoSave(); modalInstance.display(); };
+        delBtn.onclick = () => { 
+            currentShortcuts.splice(index, 1); 
+            void modalInstance.autoSave().then(() => modalInstance.display()); 
+        };
 
         itemEl.ondragstart = (e: DragEvent) => { if(e.dataTransfer) e.dataTransfer.setData('text/plain', index.toString()); itemEl.classList.add('is-dragging'); };
         itemEl.ondragover = (e: DragEvent) => { e.preventDefault(); itemEl.classList.add('drag-over'); };
         itemEl.ondragleave = () => itemEl.classList.remove('drag-over');
-        itemEl.ondrop = async (e: DragEvent) => {
+        itemEl.ondrop = (e: DragEvent) => {
             e.preventDefault(); itemEl.classList.remove('drag-over');
             if(!e.dataTransfer) return;
             const dragIndex = parseInt(e.dataTransfer.getData('text/plain'));
             if (dragIndex !== index && !isNaN(dragIndex)) {
                 const [draggedItem] = currentShortcuts.splice(dragIndex, 1);
                 currentShortcuts.splice(index, 0, draggedItem);
-                await modalInstance.autoSave(); modalInstance.display();
+                void modalInstance.autoSave().then(() => modalInstance.display());
             }
         };
-        itemEl.ondragend = () => activeDocument.querySelectorAll('.fs-shortcut-item').forEach(el => el.classList.remove('drag-over', 'is-dragging'));
+        itemEl.ondragend = () => activeDocument.body.findAll('.fs-shortcut-item').forEach(el => el.classList.remove('drag-over', 'is-dragging'));
     });
 
     const btnContainer = contentEl.createDiv({ cls: 'setting-btn-container' });
     const addBtn = btnContainer.createEl('button', { text: addBtnText });
     addBtn.onclick = () => {
         if (cachedFiles.length === 0) return new Notice("目录下没有符合条件(且未被挂载)的文件！");
-        new FilePickerModal(plugin.app, cachedFiles, async (selectedFile: TFile) => {
+        new FilePickerModal(plugin.app, cachedFiles, (selectedFile: TFile) => {
             const smartData = plugin.getSmartIconData(selectedFile.path);
             currentShortcuts.push({ path: selectedFile.path, icon: smartData.icon, color: smartData.color || '' });
-            await modalInstance.autoSave(); modalInstance.display();
+            void modalInstance.autoSave().then(() => modalInstance.display());
         }).open();
     };
 }
@@ -890,7 +912,6 @@ class CombinedSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
         
-
         new Setting(containerEl).setName('自动源码模式与隐藏文件夹设置').setHeading();
 
         new Setting(containerEl)
@@ -898,14 +919,17 @@ class CombinedSettingTab extends PluginSettingTab {
             .setDesc('关闭此开关后，打开特定文件时不再自动切换到源码模式。')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.autoSourceEnabled)
-                .onChange(async (value) => {
+                .onChange((value) => {
                     this.plugin.settings.autoSourceEnabled = value;
-                    await this.plugin.saveSettings();
+                    void this.plugin.saveSettings();
                 }));
 
         new Setting(containerEl).setName('需要开启源码模式的文件名').addTextArea(text => {
             text.inputEl.rows = 5; text.inputEl.addClass('setting-textarea-full');
-            text.setValue(this.plugin.settings.targetFiles).onChange(async (v) => { this.plugin.settings.targetFiles = v; await this.plugin.saveSettings(); });
+            text.setValue(this.plugin.settings.targetFiles).onChange((v) => { 
+                this.plugin.settings.targetFiles = v; 
+                void this.plugin.saveSettings(); 
+            });
         });
 
         new Setting(containerEl)
@@ -913,33 +937,36 @@ class CombinedSettingTab extends PluginSettingTab {
             .setDesc('开启后，每次打开 Markdown 文件时会自动折叠顶部的笔记属性 (Properties) 区域。')
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.autoCollapseProperties)
-                .onChange(async (value) => {
+                .onChange((value) => {
                     this.plugin.settings.autoCollapseProperties = value;
-                    await this.plugin.saveSettings();
+                    void this.plugin.saveSettings();
                 }));
 
         new Setting(containerEl).setName('隐藏文件夹设置').setHeading();
 
+        let hiddenFolderTextArea: TextAreaComponent | null = null;
         new Setting(containerEl)
             .setName('完全隐藏的文件夹')
             .setDesc('手动输入路径，或点击右侧"浏览"按钮搜索添加（每行一个）。')
             .addTextArea(text => {
+                hiddenFolderTextArea = text;
                 text.inputEl.rows = 5; text.inputEl.addClass('setting-textarea-full');
-                text.setValue(this.plugin.settings.hiddenFolders).onChange(async (v) => {
+                text.setValue(this.plugin.settings.hiddenFolders).onChange((v) => {
                     this.plugin.settings.hiddenFolders = v;
-                    await this.plugin.saveSettings();
+                    void this.plugin.saveSettings();
                 });
             })
             .addButton(btn => btn
                 .setButtonText('🔍 浏览...')
                 .setTooltip('在仓库中搜索并选择文件夹')
                 .onClick(() => {
-                    new FolderSuggestModal(this.app, async (folderPath: string) => {
-                        let currentVal = this.plugin.settings.hiddenFolders.trim();
-                        let newVal = currentVal ? currentVal + '\n' + folderPath : folderPath;
+                    new FolderSuggestModal(this.app, (folderPath: string) => {
+                        const currentVal = this.plugin.settings.hiddenFolders.trim();
+                        const newVal = currentVal ? currentVal + '\n' + folderPath : folderPath;
                         this.plugin.settings.hiddenFolders = newVal + '\n';
-                        await this.plugin.saveSettings();
-                        this.display(); 
+                        void this.plugin.saveSettings().then(() => {
+                            if (hiddenFolderTextArea) hiddenFolderTextArea.setValue(this.plugin.settings.hiddenFolders);
+                        });
                     }).open();
                 })
             );
@@ -957,7 +984,6 @@ class CombinedSettingTab extends PluginSettingTab {
                 const pathInput = new TextComponent(row).setPlaceholder('文件夹路径').setValue(rule.path);
                 pathInput.inputEl.classList.add('auto-source-flex-2');
 
-                // 修复 4：使用 CSS 类替代静态样式赋值
                 const statusIcon = row.createDiv({ cls: 'status-icon-container' });
 
                 const validatePath = (pathVal: string) => {
@@ -976,12 +1002,12 @@ class CombinedSettingTab extends PluginSettingTab {
                     }
                 };
                 validatePath(rule.path);
-                pathInput.onChange(async (v) => { rule.path = v; validatePath(v); await this.plugin.saveSettings(); });
+                pathInput.onChange((v) => { rule.path = v; validatePath(v); void this.plugin.saveSettings(); });
 
                 new ButtonComponent(row).setIcon('search').setTooltip('搜索文件夹')
                     .onClick(() => {
-                        new FolderSuggestModal(this.app, async (folderPath: string) => {
-                            rule.path = folderPath; await this.plugin.saveSettings(); renderLimits();
+                        new FolderSuggestModal(this.app, (folderPath: string) => {
+                            rule.path = folderPath; void this.plugin.saveSettings().then(() => renderLimits());
                         }).open();
                     });
 
@@ -990,26 +1016,31 @@ class CombinedSettingTab extends PluginSettingTab {
                 const dirTooltip = currentDir === 'bottom' ? '当前：保留【后】N个 (点击切换)' : '当前：保留【前】N个 (点击切换)';
 
                 new ButtonComponent(row).setIcon(dirIcon).setTooltip(dirTooltip)
-                    .onClick(async () => { rule.direction = currentDir === 'top' ? 'bottom' : 'top'; await this.plugin.saveSettings(); renderLimits(); });
+                    .onClick(() => { 
+                        rule.direction = currentDir === 'top' ? 'bottom' : 'top'; 
+                        void this.plugin.saveSettings().then(() => renderLimits()); 
+                    });
 
                 const limitInput = new TextComponent(row).setPlaceholder('个数')
                     .setValue(rule.limit !== null ? rule.limit.toString() : '')
-                    .onChange(async (v) => { rule.limit = v; await this.plugin.saveSettings(); });
+                    .onChange((v) => { rule.limit = v; void this.plugin.saveSettings(); });
                 limitInput.inputEl.type = 'number'; limitInput.inputEl.min = '0';
                 limitInput.inputEl.classList.add('auto-source-flex-1');
 
                 new ButtonComponent(row).setIcon('trash').setTooltip('删除')
-                    .onClick(async () => { this.plugin.settings.folderLimits.splice(index, 1); await this.plugin.saveSettings(); renderLimits(); });
+                    .onClick(() => { 
+                        this.plugin.settings.folderLimits.splice(index, 1); 
+                        void this.plugin.saveSettings().then(() => renderLimits()); 
+                    });
             });
         };
         renderLimits();
 
         new Setting(containerEl).addButton(btn => btn
             .setButtonText('添加文件显示个数').setCta()
-            .onClick(async () => {
+            .onClick(() => {
                 this.plugin.settings.folderLimits.push({ path: '', limit: 5, direction: 'top' });
-                await this.plugin.saveSettings();
-                renderLimits();
+                void this.plugin.saveSettings().then(() => renderLimits());
             })
         );
     }
