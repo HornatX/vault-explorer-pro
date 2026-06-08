@@ -7,7 +7,7 @@
 一站式侧边栏增强，让你的文件管理更高效。
 文件价文件折叠
 <p align="center">
-  <img src="assets/演示.gif" alt="演示" />
+  <img src="assets/演示1.gif" alt="演示" />
 </p>
 
 文件夹快捷图标
