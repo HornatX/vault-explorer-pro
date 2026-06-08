@@ -46,9 +46,7 @@ var IconPickerModal = class extends import_obsidian.FuzzySuggestModal {
     return item;
   }
   renderSuggestion(match, el) {
-    el.style.display = "flex";
-    el.style.alignItems = "center";
-    el.style.gap = "10px";
+    el.addClass("icon-picker-suggestion");
     const iconContainer = el.createDiv();
     (0, import_obsidian.setIcon)(iconContainer, match.item);
     el.createSpan({ text: match.item });
@@ -94,11 +92,13 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
     // --- SuperShortcuts 引擎变量 ---
-    this.hiddenStyleEl = null;
+    // 修复：使用 CSSStyleSheet 替代 HTMLStyleElement
+    this.hiddenSheet = null;
+    this.autoSourceSheet = null;
+    this.originalSheets = [];
     this.domObservers = /* @__PURE__ */ new Map();
     // --- AutoSource 引擎变量 ---
     this.foldersHidden = true;
-    this.autoSourceStyleEl = null;
     this.expandedLimits = /* @__PURE__ */ new Set();
     // 修复 2：添加内存泄漏防护
     this._isUnloading = false;
@@ -107,12 +107,10 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new CombinedSettingTab(this.app, this));
-    this.hiddenStyleEl = document.createElement("style");
-    this.hiddenStyleEl.id = "fs-dynamic-hidden-style";
-    document.head.appendChild(this.hiddenStyleEl);
-    this.autoSourceStyleEl = document.createElement("style");
-    this.autoSourceStyleEl.id = "auto-source-dynamic-style";
-    document.head.appendChild(this.autoSourceStyleEl);
+    this.originalSheets = [...document.adoptedStyleSheets];
+    this.hiddenSheet = new CSSStyleSheet();
+    this.autoSourceSheet = new CSSStyleSheet();
+    document.adoptedStyleSheets = [...this.originalSheets, this.hiddenSheet, this.autoSourceSheet];
     this.updateDynamicHiddenStyles();
     this.updateAutoSourceStyles();
     this.debouncedUpdate = (0, import_obsidian.debounce)(() => {
@@ -141,8 +139,8 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
       e.preventDefault();
       new import_obsidian.Notice("\u6587\u4EF6\u5939\u5DF2\u9501\u5B9A", 1e3);
     };
-    document.addEventListener("click", this.shortcutClickHandler, true);
-    document.addEventListener("dblclick", this.shortcutClickHandler, true);
+    activeDocument.addEventListener("click", this.shortcutClickHandler, true);
+    activeDocument.addEventListener("dblclick", this.shortcutClickHandler, true);
     this.autoSourceClickHandler = (e) => {
       const target = e.target;
       if (!target) return;
@@ -178,7 +176,7 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
         this.updateAutoSourceStyles();
       }
     };
-    this.registerDomEvent(document, "click", this.autoSourceClickHandler, true);
+    this.registerDomEvent(activeDocument, "click", this.autoSourceClickHandler, true);
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
         if (file instanceof import_obsidian.TFolder && file.path !== "/") {
@@ -219,7 +217,7 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
       this.app.workspace.on("file-open", (file) => {
         if (!file || this._isUnloading) return;
         if (this.settings.autoCollapseProperties) {
-          const timeout = setTimeout(() => {
+          const timeout = window.setTimeout(() => {
             this._timeouts.delete(timeout);
             if (this._isUnloading) return;
             const activeView = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
@@ -335,17 +333,18 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
   }
   onunload() {
     this._isUnloading = true;
-    this._timeouts.forEach((t) => clearTimeout(t));
+    this._timeouts.forEach((t) => window.clearTimeout(t));
     this._timeouts.clear();
-    if (this.hiddenStyleEl) this.hiddenStyleEl.remove();
-    if (this.autoSourceStyleEl) this.autoSourceStyleEl.remove();
-    document.removeEventListener("click", this.shortcutClickHandler, true);
-    document.removeEventListener("dblclick", this.shortcutClickHandler, true);
-    document.removeEventListener("click", this.autoSourceClickHandler, true);
+    document.adoptedStyleSheets = this.originalSheets;
+    this.hiddenSheet = null;
+    this.autoSourceSheet = null;
+    activeDocument.removeEventListener("click", this.shortcutClickHandler, true);
+    activeDocument.removeEventListener("dblclick", this.shortcutClickHandler, true);
+    activeDocument.removeEventListener("click", this.autoSourceClickHandler, true);
     this.domObservers.forEach((observer) => observer.disconnect());
     this.domObservers.clear();
-    document.querySelectorAll(".folder-shortcut-container, .file-inline-shortcut-container").forEach((el) => el.remove());
-    document.querySelectorAll(".is-locked-folder").forEach((el) => el.classList.remove("is-locked-folder"));
+    activeDocument.querySelectorAll(".folder-shortcut-container, .file-inline-shortcut-container").forEach((el) => el.remove());
+    activeDocument.querySelectorAll(".is-locked-folder").forEach((el) => el.classList.remove("is-locked-folder"));
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -365,14 +364,14 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
     this.debouncedUpdate();
   }
   updateDynamicHiddenStyles() {
-    if (!this.hiddenStyleEl) return;
+    if (!this.hiddenSheet) return;
     let cssRules = "";
     const hiddenPaths = /* @__PURE__ */ new Set();
     for (const shortcuts of Object.values(this.settings.inlineShortcuts)) {
       if (shortcuts && shortcuts.length > 0) shortcuts.forEach((sc) => hiddenPaths.add(sc.path));
     }
     if (hiddenPaths.size === 0) {
-      this.hiddenStyleEl.textContent = "";
+      this.hiddenSheet.replaceSync("");
       return;
     }
     hiddenPaths.forEach((path) => {
@@ -382,13 +381,13 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
                 .nav-file:has(> .nav-file-title[data-path="${safePath}"]) { display: none !important; height: 0 !important; margin: 0 !important; padding: 0 !important; border: none !important; }
             `;
     });
-    this.hiddenStyleEl.textContent = cssRules;
+    this.hiddenSheet.replaceSync(cssRules);
   }
   escapeCssAttributeString(str) {
     return str.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   }
   updateAutoSourceStyles() {
-    if (!this.autoSourceStyleEl) return;
+    if (!this.autoSourceSheet) return;
     let cssRules = "";
     const hiddenFolders = this.settings.hiddenFolders.split("\n").map((f) => f.trim()).filter((f) => f.length > 0);
     if (this.foldersHidden && hiddenFolders.length > 0) {
@@ -433,10 +432,10 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
         }
       });
     }
-    this.autoSourceStyleEl.textContent = cssRules;
+    this.autoSourceSheet.replaceSync(cssRules);
   }
   changeViewState(forceSource) {
-    const timeout = setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       this._timeouts.delete(timeout);
       if (this._isUnloading) return;
       const view = this.app.workspace.getActiveViewOfType(import_obsidian.MarkdownView);
@@ -444,8 +443,10 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
       const leaf = view.leaf;
       const state = leaf.getViewState();
       if (state.type !== "markdown") return;
-      const defaultViewMode = this.app.vault.getConfig?.("defaultViewMode") || "source";
-      const livePreview = this.app.vault.getConfig?.("livePreview");
+      const vault = this.app.vault;
+      const getConfig = vault.getConfig;
+      const defaultViewMode = getConfig?.("defaultViewMode") || "source";
+      const livePreview = getConfig?.("livePreview");
       let targetMode = forceSource ? "source" : defaultViewMode;
       let targetSource = forceSource ? true : livePreview === false;
       let changed = false;
@@ -507,17 +508,22 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
     if (!iconName) iconName = "file";
     let hasRendered = false;
     try {
-      const iconize = this.app.plugins.getPlugin("obsidian-icon-folder");
-      if (iconize?.api?.getIconByName) {
-        const iconObj = iconize.api.getIconByName(iconName);
+      const app = this.app;
+      const plugins = app.plugins;
+      const iconize = plugins?.getPlugin("obsidian-icon-folder");
+      if (iconize?.api) {
+        const api = iconize.api;
+        const iconObj = api.getIconByName(iconName);
         if (iconObj?.svgElement) {
-          el.innerHTML = iconObj.svgElement;
-          const svg = el.querySelector("svg");
+          const tempDiv = createDiv();
+          tempDiv.innerHTML = iconObj.svgElement;
+          const svg = tempDiv.querySelector("svg");
           if (svg) {
             svg.style.width = isInline ? "14px" : "16px";
             svg.style.height = isInline ? "14px" : "16px";
+            el.appendChild(svg);
+            hasRendered = true;
           }
-          hasRendered = true;
         }
       }
     } catch (e) {
@@ -876,7 +882,7 @@ var CombinedSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "\u81EA\u52A8\u6E90\u7801\u6A21\u5F0F\u4E0E\u9690\u85CF\u6587\u4EF6\u5939\u8BBE\u7F6E" });
+    new import_obsidian.Setting(containerEl).setName("\u81EA\u52A8\u6E90\u7801\u6A21\u5F0F\u4E0E\u9690\u85CF\u6587\u4EF6\u5939\u8BBE\u7F6E").setHeading();
     new import_obsidian.Setting(containerEl).setName("\u542F\u7528\u81EA\u52A8\u6E90\u7801\u6A21\u5F0F").setDesc("\u5173\u95ED\u6B64\u5F00\u5173\u540E\uFF0C\u6253\u5F00\u7279\u5B9A\u6587\u4EF6\u65F6\u4E0D\u518D\u81EA\u52A8\u5207\u6362\u5230\u6E90\u7801\u6A21\u5F0F\u3002").addToggle((toggle) => toggle.setValue(this.plugin.settings.autoSourceEnabled).onChange(async (value) => {
       this.plugin.settings.autoSourceEnabled = value;
       await this.plugin.saveSettings();
@@ -893,7 +899,7 @@ var CombinedSettingTab = class extends import_obsidian.PluginSettingTab {
       this.plugin.settings.autoCollapseProperties = value;
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "\u9690\u85CF\u6587\u4EF6\u5939\u8BBE\u7F6E" });
+    new import_obsidian.Setting(containerEl).setName("\u9690\u85CF\u6587\u4EF6\u5939\u8BBE\u7F6E").setHeading();
     new import_obsidian.Setting(containerEl).setName("\u5B8C\u5168\u9690\u85CF\u7684\u6587\u4EF6\u5939").setDesc("\u624B\u52A8\u8F93\u5165\u8DEF\u5F84\uFF0C\u6216\u70B9\u51FB\u53F3\u4FA7\u201C\u6D4F\u89C8\u201D\u6309\u94AE\u641C\u7D22\u6DFB\u52A0\uFF08\u6BCF\u884C\u4E00\u4E2A\uFF09\u3002").addTextArea((text) => {
       text.inputEl.rows = 5;
       text.inputEl.style.width = "100%";
@@ -912,7 +918,7 @@ var CombinedSettingTab = class extends import_obsidian.PluginSettingTab {
         }).open();
       })
     );
-    containerEl.createEl("h3", { text: "\u6587\u4EF6\u5939\u6587\u4EF6\u663E\u793A\u4E2A\u6570\u9650\u5236" });
+    new import_obsidian.Setting(containerEl).setName("\u6587\u4EF6\u5939\u6587\u4EF6\u663E\u793A\u4E2A\u6570\u9650\u5236").setHeading();
     containerEl.createEl("p", { text: "\u53EA\u663E\u793A\u524D\uFF08\u6216\u540E\uFF09N \u4E2A\u6587\u4EF6\u3002\u8D85\u51FA\u7684\u90E8\u5206\u5C06\u5728\u8FB9\u7F18\u6587\u4EF6\u53F3\u4FA7\u663E\u793A\u6298\u53E0\u6309\u94AE\u3002", cls: "setting-item-description" });
     const limitsContainer = containerEl.createDiv();
     const renderLimits = () => {
@@ -921,20 +927,20 @@ var CombinedSettingTab = class extends import_obsidian.PluginSettingTab {
         const row = limitsContainer.createDiv({ cls: "auto-source-setting-row" });
         const pathInput = new import_obsidian.TextComponent(row).setPlaceholder("\u6587\u4EF6\u5939\u8DEF\u5F84").setValue(rule.path);
         pathInput.inputEl.classList.add("auto-source-flex-2");
-        const statusIcon = row.createDiv();
-        statusIcon.style.cssText = "display: flex; align-items: center; justify-content: center; width: 24px; cursor: help;";
+        const statusIcon = row.createDiv({ cls: "status-icon-container" });
         const validatePath = (pathVal) => {
-          statusIcon.innerHTML = "";
+          statusIcon.empty();
+          statusIcon.removeClass("status-icon-success", "status-icon-error");
           const cleanPath = pathVal.trim();
           if (!cleanPath) return;
           const folder = this.plugin.app.vault.getAbstractFileByPath(cleanPath);
           if (folder instanceof import_obsidian.TFolder) {
             (0, import_obsidian.setIcon)(statusIcon, "check-circle");
-            statusIcon.style.color = "var(--text-success)";
+            statusIcon.addClass("status-icon-success");
             statusIcon.setAttribute("aria-label", "\u9A8C\u8BC1\u901A\u8FC7\uFF1A\u6587\u4EF6\u5939\u5B58\u5728");
           } else {
             (0, import_obsidian.setIcon)(statusIcon, "alert-circle");
-            statusIcon.style.color = "var(--text-error)";
+            statusIcon.addClass("status-icon-error");
             statusIcon.setAttribute("aria-label", "\u672A\u627E\u5230\u8BE5\u6587\u4EF6\u5939\uFF0C\u8BF7\u68C0\u67E5\u8DEF\u5F84\u62FC\u5199");
           }
         };

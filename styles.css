@@ -24,6 +24,29 @@
     flex: 1;
 }
 
+/* 设置面板通用样式 */
+.icon-picker-suggestion {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.status-icon-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    cursor: help;
+}
+
+.status-icon-success {
+    color: var(--text-success);
+}
+
+.status-icon-error {
+    color: var(--text-error);
+}
+
 /* ========================================================
    一、 [SuperShortcuts] 文件夹快捷方式 UI 与排版
 ======================================================== */

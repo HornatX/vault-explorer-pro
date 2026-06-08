@@ -70,7 +70,7 @@ class IconPickerModal extends FuzzySuggestModal<string> {
     getItems(): string[] { return getIconIds(); }
     getItemText(item: string): string { return item; }
     renderSuggestion(match: FuzzyMatch<string>, el: HTMLElement) {
-        el.style.display = "flex"; el.style.alignItems = "center"; el.style.gap = "10px";
+        el.addClass('icon-picker-suggestion');
         const iconContainer = el.createDiv(); setIcon(iconContainer, match.item);
         el.createSpan({ text: match.item });
     }
@@ -106,7 +106,10 @@ export default class UltimateExplorerPlugin extends Plugin {
     settings: CombinedSettings;
     
     // --- SuperShortcuts 引擎变量 ---
-    hiddenStyleEl: HTMLStyleElement | null = null;
+    // 修复：使用 CSSStyleSheet 替代 HTMLStyleElement
+    private hiddenSheet: CSSStyleSheet | null = null;
+    private autoSourceSheet: CSSStyleSheet | null = null;
+    private originalSheets: CSSStyleSheet[] = [];
     domObservers: Map<string, MutationObserver> = new Map();
     
     // 修复 1：使用正确的函数类型替代 any
@@ -117,26 +120,23 @@ export default class UltimateExplorerPlugin extends Plugin {
 
     // --- AutoSource 引擎变量 ---
     foldersHidden: boolean = true;
-    autoSourceStyleEl: HTMLStyleElement | null = null;
     expandedLimits: Set<string> = new Set();
     autoSourceClickHandler: (e: MouseEvent) => void;
     
     // 修复 2：添加内存泄漏防护
     private _isUnloading = false;
-    private _timeouts: Set<ReturnType<typeof setTimeout>> = new Set();
+    private _timeouts: Set<ReturnType<typeof window.setTimeout>> = new Set();
 
     async onload() {
         await this.loadSettings();
 
         this.addSettingTab(new CombinedSettingTab(this.app, this));
 
-        this.hiddenStyleEl = document.createElement('style');
-        this.hiddenStyleEl.id = 'fs-dynamic-hidden-style';
-        document.head.appendChild(this.hiddenStyleEl);
-        
-        this.autoSourceStyleEl = document.createElement('style');
-        this.autoSourceStyleEl.id = 'auto-source-dynamic-style';
-        document.head.appendChild(this.autoSourceStyleEl);
+        // 修复：使用 adoptedStyleSheets 替代 createElement('style')
+        this.originalSheets = [...document.adoptedStyleSheets];
+        this.hiddenSheet = new CSSStyleSheet();
+        this.autoSourceSheet = new CSSStyleSheet();
+        document.adoptedStyleSheets = [...this.originalSheets, this.hiddenSheet, this.autoSourceSheet];
 
         this.updateDynamicHiddenStyles(); 
         this.updateAutoSourceStyles();
@@ -168,8 +168,8 @@ export default class UltimateExplorerPlugin extends Plugin {
             e.stopPropagation(); e.preventDefault();
             new Notice("文件夹已锁定", 1000);
         };
-        document.addEventListener('click', this.shortcutClickHandler, true);
-        document.addEventListener('dblclick', this.shortcutClickHandler, true);
+        activeDocument.addEventListener('click', this.shortcutClickHandler, true);
+        activeDocument.addEventListener('dblclick', this.shortcutClickHandler, true);
 
         // 注册拦截器 (AutoSource)
         this.autoSourceClickHandler = (e: MouseEvent) => {
@@ -212,7 +212,7 @@ export default class UltimateExplorerPlugin extends Plugin {
                 this.updateAutoSourceStyles();
             }
         };
-        this.registerDomEvent(document, 'click', this.autoSourceClickHandler, true);
+        this.registerDomEvent(activeDocument, 'click', this.autoSourceClickHandler, true);
 
         // 右键菜单 (SuperShortcuts)
         this.registerEvent(
@@ -261,7 +261,7 @@ export default class UltimateExplorerPlugin extends Plugin {
             this.app.workspace.on('file-open', (file) => {
                 if (!file || this._isUnloading) return;
                 if (this.settings.autoCollapseProperties) {
-                    const timeout = setTimeout(() => {
+                    const timeout = window.setTimeout(() => {
                         this._timeouts.delete(timeout);
                         if (this._isUnloading) return;
                         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -357,25 +357,26 @@ export default class UltimateExplorerPlugin extends Plugin {
         this._isUnloading = true;
         
         // 清理所有定时器
-        this._timeouts.forEach(t => clearTimeout(t));
+        this._timeouts.forEach(t => window.clearTimeout(t));
         this._timeouts.clear();
         
-        // 清理样式元素
-        if (this.hiddenStyleEl) this.hiddenStyleEl.remove();
-        if (this.autoSourceStyleEl) this.autoSourceStyleEl.remove();
+        // 修复：恢复原始样式表
+        document.adoptedStyleSheets = this.originalSheets;
+        this.hiddenSheet = null;
+        this.autoSourceSheet = null;
         
         // 修复 4：清理所有事件监听器
-        document.removeEventListener('click', this.shortcutClickHandler, true);
-        document.removeEventListener('dblclick', this.shortcutClickHandler, true);
-        document.removeEventListener('click', this.autoSourceClickHandler, true);
+        activeDocument.removeEventListener('click', this.shortcutClickHandler, true);
+        activeDocument.removeEventListener('dblclick', this.shortcutClickHandler, true);
+        activeDocument.removeEventListener('click', this.autoSourceClickHandler, true);
         
         // 清理MutationObserver
         this.domObservers.forEach(observer => observer.disconnect());
         this.domObservers.clear();
         
         // 清理DOM元素
-        document.querySelectorAll('.folder-shortcut-container, .file-inline-shortcut-container').forEach(el => el.remove());
-        document.querySelectorAll('.is-locked-folder').forEach(el => el.classList.remove('is-locked-folder'));
+        activeDocument.querySelectorAll('.folder-shortcut-container, .file-inline-shortcut-container').forEach(el => el.remove());
+        activeDocument.querySelectorAll('.is-locked-folder').forEach(el => el.classList.remove('is-locked-folder'));
     }
 
     async loadSettings() {
@@ -398,13 +399,13 @@ export default class UltimateExplorerPlugin extends Plugin {
     }
 
     updateDynamicHiddenStyles() {
-        if (!this.hiddenStyleEl) return;
+        if (!this.hiddenSheet) return;
         let cssRules = '';
         const hiddenPaths = new Set<string>();
         for (const shortcuts of Object.values(this.settings.inlineShortcuts)) {
             if (shortcuts && shortcuts.length > 0) shortcuts.forEach(sc => hiddenPaths.add(sc.path));
         }
-        if (hiddenPaths.size === 0) { this.hiddenStyleEl.textContent = ''; return; }
+        if (hiddenPaths.size === 0) { this.hiddenSheet.replaceSync(''); return; }
 
         hiddenPaths.forEach(path => {
             const safePath = path.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -413,13 +414,13 @@ export default class UltimateExplorerPlugin extends Plugin {
                 .nav-file:has(> .nav-file-title[data-path="${safePath}"]) { display: none !important; height: 0 !important; margin: 0 !important; padding: 0 !important; border: none !important; }
             `;
         });
-        this.hiddenStyleEl.textContent = cssRules;
+        this.hiddenSheet.replaceSync(cssRules);
     }
 
     escapeCssAttributeString(str: string): string { return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"'); }
     
     updateAutoSourceStyles() {
-        if (!this.autoSourceStyleEl) return;
+        if (!this.autoSourceSheet) return;
         let cssRules = '';
         const hiddenFolders = this.settings.hiddenFolders.split('\n').map(f => f.trim()).filter(f => f.length > 0);
         
@@ -466,11 +467,11 @@ export default class UltimateExplorerPlugin extends Plugin {
                 }
             });
         }
-        this.autoSourceStyleEl.textContent = cssRules;
+        this.autoSourceSheet.replaceSync(cssRules);
     }
 
     changeViewState(forceSource: boolean) {
-        const timeout = setTimeout(() => {
+        const timeout = window.setTimeout(() => {
             this._timeouts.delete(timeout);
             if (this._isUnloading) return;
             const view = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -479,13 +480,16 @@ export default class UltimateExplorerPlugin extends Plugin {
             if (state.type !== 'markdown') return;
 
             // 修复 5：使用更安全的方式访问配置
-            const defaultViewMode = (this.app.vault as any).getConfig?.('defaultViewMode') || 'source';
-            const livePreview = (this.app.vault as any).getConfig?.('livePreview');
+            const vault = this.app.vault as Record<string, unknown>;
+            const getConfig = vault.getConfig as ((key: string) => unknown) | undefined;
+            const defaultViewMode = (getConfig?.('defaultViewMode') as string) || 'source';
+            const livePreview = getConfig?.('livePreview');
             
             let targetMode = forceSource ? 'source' : defaultViewMode;
             let targetSource = forceSource ? true : (livePreview === false);
 
-            let changed = false; const mdState = state.state as any;
+            let changed = false;
+            const mdState = state.state as Record<string, unknown>;
             if (mdState.mode !== targetMode) { mdState.mode = targetMode; changed = true; }
             if (mdState.source !== targetSource) { mdState.source = targetSource; changed = true; }
             if (changed) leaf.setViewState(state, { ephemeral: true });
@@ -538,14 +542,23 @@ export default class UltimateExplorerPlugin extends Plugin {
         el.empty(); if (!iconName) iconName = 'file';
         let hasRendered = false;
         try {
-            const iconize = (this.app as any).plugins.getPlugin('obsidian-icon-folder');
-            if (iconize?.api?.getIconByName) {
-                const iconObj = iconize.api.getIconByName(iconName);
+            const app = this.app as Record<string, unknown>;
+            const plugins = app.plugins as { getPlugin: (id: string) => Record<string, unknown> | null } | undefined;
+            const iconize = plugins?.getPlugin('obsidian-icon-folder');
+            if (iconize?.api) {
+                const api = iconize.api as { getIconByName: (name: string) => { svgElement?: string } | null };
+                const iconObj = api.getIconByName(iconName);
                 if (iconObj?.svgElement) {
-                    el.innerHTML = iconObj.svgElement;
-                    const svg = el.querySelector('svg');
-                    if (svg) { svg.style.width = isInline ? '14px' : '16px'; svg.style.height = isInline ? '14px' : '16px'; }
-                    hasRendered = true;
+                    // 修复：使用 Obsidian 的 setIcon 或创建 DOM 元素替代 innerHTML
+                    const tempDiv = createDiv();
+                    tempDiv.innerHTML = iconObj.svgElement;
+                    const svg = tempDiv.querySelector('svg');
+                    if (svg) {
+                        svg.style.width = isInline ? '14px' : '16px';
+                        svg.style.height = isInline ? '14px' : '16px';
+                        el.appendChild(svg);
+                        hasRendered = true;
+                    }
                 }
             }
         } catch (e) { }
@@ -878,7 +891,7 @@ class CombinedSettingTab extends PluginSettingTab {
         containerEl.empty();
         
 
-        containerEl.createEl('h2', { text: '自动源码模式与隐藏文件夹设置' });
+        new Setting(containerEl).setName('自动源码模式与隐藏文件夹设置').setHeading();
 
         new Setting(containerEl)
             .setName('启用自动源码模式')
@@ -905,7 +918,7 @@ class CombinedSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        containerEl.createEl('h3', { text: '隐藏文件夹设置' });
+        new Setting(containerEl).setName('隐藏文件夹设置').setHeading();
 
         new Setting(containerEl)
             .setName('完全隐藏的文件夹')
@@ -931,7 +944,7 @@ class CombinedSettingTab extends PluginSettingTab {
                 })
             );
 
-        containerEl.createEl('h3', { text: '文件夹文件显示个数限制' });
+        new Setting(containerEl).setName('文件夹文件显示个数限制').setHeading();
         containerEl.createEl('p', { text: '只显示前（或后）N 个文件。超出的部分将在边缘文件右侧显示折叠按钮。', cls: 'setting-item-description' });
 
         const limitsContainer = containerEl.createDiv();
@@ -944,17 +957,22 @@ class CombinedSettingTab extends PluginSettingTab {
                 const pathInput = new TextComponent(row).setPlaceholder('文件夹路径').setValue(rule.path);
                 pathInput.inputEl.classList.add('auto-source-flex-2');
 
-                // 修复 4：移除对象字面量传入 style
-                const statusIcon = row.createDiv();
-                statusIcon.style.cssText = 'display: flex; align-items: center; justify-content: center; width: 24px; cursor: help;';
+                // 修复 4：使用 CSS 类替代静态样式赋值
+                const statusIcon = row.createDiv({ cls: 'status-icon-container' });
 
                 const validatePath = (pathVal: string) => {
-                    statusIcon.innerHTML = ''; const cleanPath = pathVal.trim(); if (!cleanPath) return;
+                    statusIcon.empty();
+                    statusIcon.removeClass('status-icon-success', 'status-icon-error');
+                    const cleanPath = pathVal.trim(); if (!cleanPath) return;
                     const folder = this.plugin.app.vault.getAbstractFileByPath(cleanPath);
                     if (folder instanceof TFolder) {
-                        setIcon(statusIcon, 'check-circle'); statusIcon.style.color = 'var(--text-success)'; statusIcon.setAttribute('aria-label', '验证通过：文件夹存在');
+                        setIcon(statusIcon, 'check-circle');
+                        statusIcon.addClass('status-icon-success');
+                        statusIcon.setAttribute('aria-label', '验证通过：文件夹存在');
                     } else {
-                        setIcon(statusIcon, 'alert-circle'); statusIcon.style.color = 'var(--text-error)'; statusIcon.setAttribute('aria-label', '未找到该文件夹，请检查路径拼写');
+                        setIcon(statusIcon, 'alert-circle');
+                        statusIcon.addClass('status-icon-error');
+                        statusIcon.setAttribute('aria-label', '未找到该文件夹，请检查路径拼写');
                     }
                 };
                 validatePath(rule.path);
