@@ -425,3 +425,18 @@
     /* 文字颜色：确保看得很清楚 */
     color: var(--text-normal) !important; 
 }
+
+/* 设置面板布局样式 */
+.setting-item-description-spaced {
+    margin-bottom: 20px;
+}
+
+.setting-btn-container {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 15px;
+}
+
+.setting-textarea-full {
+    width: 100%;
+}

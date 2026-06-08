@@ -133,10 +133,10 @@ export default class UltimateExplorerPlugin extends Plugin {
         this.addSettingTab(new CombinedSettingTab(this.app, this));
 
         // 修复：使用 adoptedStyleSheets 替代 createElement('style')
-        this.originalSheets = [...document.adoptedStyleSheets];
+        this.originalSheets = [...activeDocument.adoptedStyleSheets];
         this.hiddenSheet = new CSSStyleSheet();
         this.autoSourceSheet = new CSSStyleSheet();
-        document.adoptedStyleSheets = [...this.originalSheets, this.hiddenSheet, this.autoSourceSheet];
+        activeDocument.adoptedStyleSheets = [...this.originalSheets, this.hiddenSheet, this.autoSourceSheet];
 
         this.updateDynamicHiddenStyles(); 
         this.updateAutoSourceStyles();
@@ -361,7 +361,7 @@ export default class UltimateExplorerPlugin extends Plugin {
         this._timeouts.clear();
         
         // 修复：恢复原始样式表
-        document.adoptedStyleSheets = this.originalSheets;
+        activeDocument.adoptedStyleSheets = this.originalSheets;
         this.hiddenSheet = null;
         this.autoSourceSheet = null;
         
@@ -549,19 +549,19 @@ export default class UltimateExplorerPlugin extends Plugin {
                 const api = iconize.api as { getIconByName: (name: string) => { svgElement?: string } | null };
                 const iconObj = api.getIconByName(iconName);
                 if (iconObj?.svgElement) {
-                    // 修复：使用 Obsidian 的 setIcon 或创建 DOM 元素替代 innerHTML
-                    const tempDiv = createDiv();
-                    tempDiv.innerHTML = iconObj.svgElement;
-                    const svg = tempDiv.querySelector('svg');
+                    // 修复：使用 DOMParser 替代 innerHTML
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(iconObj.svgElement, 'image/svg+xml');
+                    const svg = doc.querySelector('svg');
                     if (svg) {
                         svg.style.width = isInline ? '14px' : '16px';
                         svg.style.height = isInline ? '14px' : '16px';
-                        el.appendChild(svg);
+                        el.appendChild(document.adoptNode(svg));
                         hasRendered = true;
                     }
                 }
             }
-        } catch (e) { }
+        } catch (_e) { /* iconize plugin not available */ }
 
         if (!hasRendered) {
             setIcon(el, iconName);
@@ -605,11 +605,11 @@ export default class UltimateExplorerPlugin extends Plugin {
                 if (existingContainer && existingContainer.dataset.fsState === currentStateStr && existingContainer.dataset.fsPath === folderPath) return;
                 if (existingContainer) existingContainer.remove();
 
-                const container = document.createElement('div');
+                const container = activeDocument.createElement('div');
                 container.className = 'folder-shortcut-container'; container.dataset.fsState = currentStateStr; container.dataset.fsPath = folderPath;
 
                 shortcuts.forEach(sc => {
-                    const iconEl = document.createElement('div'); iconEl.className = 'folder-shortcut-icon'; iconEl.tabIndex = 0;
+                    const iconEl = activeDocument.createElement('div'); iconEl.className = 'folder-shortcut-icon'; iconEl.tabIndex = 0;
                     const targetFile = this.app.vault.getAbstractFileByPath(sc.path);
                     const isBroken = !targetFile || !targetFile.path.startsWith(folderPath + "/");
 
@@ -660,11 +660,11 @@ export default class UltimateExplorerPlugin extends Plugin {
                 if (existingContainer && existingContainer.dataset.fsState === currentStateStr) continue;
                 if (existingContainer) existingContainer.remove();
 
-                const container = document.createElement('div'); container.className = 'file-inline-shortcut-container';
+                const container = activeDocument.createElement('div'); container.className = 'file-inline-shortcut-container';
                 container.dataset.fsState = currentStateStr; container.dataset.fsPath = mainFilePath;
 
                 shortcuts.forEach(sc => {
-                    const iconEl = document.createElement('div'); iconEl.className = 'file-inline-shortcut-icon';
+                    const iconEl = activeDocument.createElement('div'); iconEl.className = 'file-inline-shortcut-icon';
                     const targetFile = this.app.vault.getAbstractFileByPath(sc.path);
                     const isBroken = !targetFile;
 
@@ -800,9 +800,8 @@ function renderSettingModal(modalInstance: IShortcutSettingModal, cachedFiles: T
     const isFileModal = modalType === 'file';
     const descText = isFileModal ? '选择的附属文件将在左侧列表中隐藏，并紧贴在当前主文件名后。' : '按住列表即可上下拖拽排序。任何修改自动保存。';
     
-    // 修复 3：移除对象字面量传入 style，改为安全赋值
-    const pEl = contentEl.createEl('p', { text: descText, cls: 'setting-item-description' });
-    pEl.style.marginBottom = '20px';
+    // 修复 3：使用 CSS 类替代静态样式赋值
+    const pEl = contentEl.createEl('p', { text: descText, cls: 'setting-item-description setting-item-description-spaced' });
 
     const listContainer = contentEl.createDiv('fs-shortcut-list');
     currentShortcuts.forEach((sc, index) => {
@@ -813,7 +812,9 @@ function renderSettingModal(modalInstance: IShortcutSettingModal, cachedFiles: T
         selectBtn.createEl('span', { text: currentFile ? currentFile.name : "文件已丢失(点击重选)" });
 
         const iconBtn = itemEl.createDiv('fs-icon-btn');
-        iconBtn.style.color = sc.color || 'var(--text-normal)'; plugin.renderIconSafe(iconBtn, sc.icon, isFileModal);
+        // 修复：使用 setProperty 替代直接赋值
+        iconBtn.style.setProperty('color', sc.color || 'var(--text-normal)');
+        plugin.renderIconSafe(iconBtn, sc.icon, isFileModal);
 
         selectBtn.onclick = () => {
             if (cachedFiles.length === 0) { new Notice("目录下没有更多可供挂载的文件了！"); return; }
@@ -859,11 +860,10 @@ function renderSettingModal(modalInstance: IShortcutSettingModal, cachedFiles: T
                 await modalInstance.autoSave(); modalInstance.display();
             }
         };
-        itemEl.ondragend = () => document.querySelectorAll('.fs-shortcut-item').forEach(el => el.classList.remove('drag-over', 'is-dragging'));
+        itemEl.ondragend = () => activeDocument.querySelectorAll('.fs-shortcut-item').forEach(el => el.classList.remove('drag-over', 'is-dragging'));
     });
 
-    const btnContainer = contentEl.createDiv();
-    btnContainer.style.cssText = 'display: flex; justify-content: flex-start; margin-top: 15px;';
+    const btnContainer = contentEl.createDiv({ cls: 'setting-btn-container' });
     const addBtn = btnContainer.createEl('button', { text: addBtnText });
     addBtn.onclick = () => {
         if (cachedFiles.length === 0) return new Notice("目录下没有符合条件(且未被挂载)的文件！");
@@ -904,7 +904,7 @@ class CombinedSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl).setName('需要开启源码模式的文件名').addTextArea(text => {
-            text.inputEl.rows = 5; text.inputEl.style.width = '100%';
+            text.inputEl.rows = 5; text.inputEl.addClass('setting-textarea-full');
             text.setValue(this.plugin.settings.targetFiles).onChange(async (v) => { this.plugin.settings.targetFiles = v; await this.plugin.saveSettings(); });
         });
 
@@ -922,9 +922,9 @@ class CombinedSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('完全隐藏的文件夹')
-            .setDesc('手动输入路径，或点击右侧“浏览”按钮搜索添加（每行一个）。')
+            .setDesc('手动输入路径，或点击右侧"浏览"按钮搜索添加（每行一个）。')
             .addTextArea(text => {
-                text.inputEl.rows = 5; text.inputEl.style.width = '100%';
+                text.inputEl.rows = 5; text.inputEl.addClass('setting-textarea-full');
                 text.setValue(this.plugin.settings.hiddenFolders).onChange(async (v) => {
                     this.plugin.settings.hiddenFolders = v;
                     await this.plugin.saveSettings();

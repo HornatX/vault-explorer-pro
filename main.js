@@ -107,10 +107,10 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new CombinedSettingTab(this.app, this));
-    this.originalSheets = [...document.adoptedStyleSheets];
+    this.originalSheets = [...activeDocument.adoptedStyleSheets];
     this.hiddenSheet = new CSSStyleSheet();
     this.autoSourceSheet = new CSSStyleSheet();
-    document.adoptedStyleSheets = [...this.originalSheets, this.hiddenSheet, this.autoSourceSheet];
+    activeDocument.adoptedStyleSheets = [...this.originalSheets, this.hiddenSheet, this.autoSourceSheet];
     this.updateDynamicHiddenStyles();
     this.updateAutoSourceStyles();
     this.debouncedUpdate = (0, import_obsidian.debounce)(() => {
@@ -335,7 +335,7 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
     this._isUnloading = true;
     this._timeouts.forEach((t) => window.clearTimeout(t));
     this._timeouts.clear();
-    document.adoptedStyleSheets = this.originalSheets;
+    activeDocument.adoptedStyleSheets = this.originalSheets;
     this.hiddenSheet = null;
     this.autoSourceSheet = null;
     activeDocument.removeEventListener("click", this.shortcutClickHandler, true);
@@ -515,18 +515,18 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
         const api = iconize.api;
         const iconObj = api.getIconByName(iconName);
         if (iconObj?.svgElement) {
-          const tempDiv = createDiv();
-          tempDiv.innerHTML = iconObj.svgElement;
-          const svg = tempDiv.querySelector("svg");
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(iconObj.svgElement, "image/svg+xml");
+          const svg = doc.querySelector("svg");
           if (svg) {
             svg.style.width = isInline ? "14px" : "16px";
             svg.style.height = isInline ? "14px" : "16px";
-            el.appendChild(svg);
+            el.appendChild(document.adoptNode(svg));
             hasRendered = true;
           }
         }
       }
-    } catch (e) {
+    } catch (_e) {
     }
     if (!hasRendered) {
       (0, import_obsidian.setIcon)(el, iconName);
@@ -570,12 +570,12 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
         const currentStateStr = JSON.stringify(stateToTrack);
         if (existingContainer && existingContainer.dataset.fsState === currentStateStr && existingContainer.dataset.fsPath === folderPath) return;
         if (existingContainer) existingContainer.remove();
-        const container = document.createElement("div");
+        const container = activeDocument.createElement("div");
         container.className = "folder-shortcut-container";
         container.dataset.fsState = currentStateStr;
         container.dataset.fsPath = folderPath;
         shortcuts.forEach((sc) => {
-          const iconEl = document.createElement("div");
+          const iconEl = activeDocument.createElement("div");
           iconEl.className = "folder-shortcut-icon";
           iconEl.tabIndex = 0;
           const targetFile = this.app.vault.getAbstractFileByPath(sc.path);
@@ -627,12 +627,12 @@ var UltimateExplorerPlugin = class extends import_obsidian.Plugin {
         const existingContainer = titleNode.querySelector(".file-inline-shortcut-container");
         if (existingContainer && existingContainer.dataset.fsState === currentStateStr) continue;
         if (existingContainer) existingContainer.remove();
-        const container = document.createElement("div");
+        const container = activeDocument.createElement("div");
         container.className = "file-inline-shortcut-container";
         container.dataset.fsState = currentStateStr;
         container.dataset.fsPath = mainFilePath;
         shortcuts.forEach((sc) => {
-          const iconEl = document.createElement("div");
+          const iconEl = activeDocument.createElement("div");
           iconEl.className = "file-inline-shortcut-icon";
           const targetFile = this.app.vault.getAbstractFileByPath(sc.path);
           const isBroken = !targetFile;
@@ -778,8 +778,7 @@ function renderSettingModal(modalInstance, cachedFiles, addBtnText) {
   contentEl.empty();
   const isFileModal = modalType === "file";
   const descText = isFileModal ? "\u9009\u62E9\u7684\u9644\u5C5E\u6587\u4EF6\u5C06\u5728\u5DE6\u4FA7\u5217\u8868\u4E2D\u9690\u85CF\uFF0C\u5E76\u7D27\u8D34\u5728\u5F53\u524D\u4E3B\u6587\u4EF6\u540D\u540E\u3002" : "\u6309\u4F4F\u5217\u8868\u5373\u53EF\u4E0A\u4E0B\u62D6\u62FD\u6392\u5E8F\u3002\u4EFB\u4F55\u4FEE\u6539\u81EA\u52A8\u4FDD\u5B58\u3002";
-  const pEl = contentEl.createEl("p", { text: descText, cls: "setting-item-description" });
-  pEl.style.marginBottom = "20px";
+  const pEl = contentEl.createEl("p", { text: descText, cls: "setting-item-description setting-item-description-spaced" });
   const listContainer = contentEl.createDiv("fs-shortcut-list");
   currentShortcuts.forEach((sc, index) => {
     const itemEl = listContainer.createDiv({ cls: "fs-shortcut-item", attr: { "draggable": "true" } });
@@ -787,7 +786,7 @@ function renderSettingModal(modalInstance, cachedFiles, addBtnText) {
     const selectBtn = itemEl.createDiv({ cls: "fs-file-select-btn" });
     selectBtn.createEl("span", { text: currentFile ? currentFile.name : "\u6587\u4EF6\u5DF2\u4E22\u5931(\u70B9\u51FB\u91CD\u9009)" });
     const iconBtn = itemEl.createDiv("fs-icon-btn");
-    iconBtn.style.color = sc.color || "var(--text-normal)";
+    iconBtn.style.setProperty("color", sc.color || "var(--text-normal)");
     plugin.renderIconSafe(iconBtn, sc.icon, isFileModal);
     selectBtn.onclick = () => {
       if (cachedFiles.length === 0) {
@@ -859,10 +858,9 @@ function renderSettingModal(modalInstance, cachedFiles, addBtnText) {
         modalInstance.display();
       }
     };
-    itemEl.ondragend = () => document.querySelectorAll(".fs-shortcut-item").forEach((el) => el.classList.remove("drag-over", "is-dragging"));
+    itemEl.ondragend = () => activeDocument.querySelectorAll(".fs-shortcut-item").forEach((el) => el.classList.remove("drag-over", "is-dragging"));
   });
-  const btnContainer = contentEl.createDiv();
-  btnContainer.style.cssText = "display: flex; justify-content: flex-start; margin-top: 15px;";
+  const btnContainer = contentEl.createDiv({ cls: "setting-btn-container" });
   const addBtn = btnContainer.createEl("button", { text: addBtnText });
   addBtn.onclick = () => {
     if (cachedFiles.length === 0) return new import_obsidian.Notice("\u76EE\u5F55\u4E0B\u6CA1\u6709\u7B26\u5408\u6761\u4EF6(\u4E14\u672A\u88AB\u6302\u8F7D)\u7684\u6587\u4EF6\uFF01");
@@ -889,7 +887,7 @@ var CombinedSettingTab = class extends import_obsidian.PluginSettingTab {
     }));
     new import_obsidian.Setting(containerEl).setName("\u9700\u8981\u5F00\u542F\u6E90\u7801\u6A21\u5F0F\u7684\u6587\u4EF6\u540D").addTextArea((text) => {
       text.inputEl.rows = 5;
-      text.inputEl.style.width = "100%";
+      text.inputEl.addClass("setting-textarea-full");
       text.setValue(this.plugin.settings.targetFiles).onChange(async (v) => {
         this.plugin.settings.targetFiles = v;
         await this.plugin.saveSettings();
@@ -900,9 +898,9 @@ var CombinedSettingTab = class extends import_obsidian.PluginSettingTab {
       await this.plugin.saveSettings();
     }));
     new import_obsidian.Setting(containerEl).setName("\u9690\u85CF\u6587\u4EF6\u5939\u8BBE\u7F6E").setHeading();
-    new import_obsidian.Setting(containerEl).setName("\u5B8C\u5168\u9690\u85CF\u7684\u6587\u4EF6\u5939").setDesc("\u624B\u52A8\u8F93\u5165\u8DEF\u5F84\uFF0C\u6216\u70B9\u51FB\u53F3\u4FA7\u201C\u6D4F\u89C8\u201D\u6309\u94AE\u641C\u7D22\u6DFB\u52A0\uFF08\u6BCF\u884C\u4E00\u4E2A\uFF09\u3002").addTextArea((text) => {
+    new import_obsidian.Setting(containerEl).setName("\u5B8C\u5168\u9690\u85CF\u7684\u6587\u4EF6\u5939").setDesc('\u624B\u52A8\u8F93\u5165\u8DEF\u5F84\uFF0C\u6216\u70B9\u51FB\u53F3\u4FA7"\u6D4F\u89C8"\u6309\u94AE\u641C\u7D22\u6DFB\u52A0\uFF08\u6BCF\u884C\u4E00\u4E2A\uFF09\u3002').addTextArea((text) => {
       text.inputEl.rows = 5;
-      text.inputEl.style.width = "100%";
+      text.inputEl.addClass("setting-textarea-full");
       text.setValue(this.plugin.settings.hiddenFolders).onChange(async (v) => {
         this.plugin.settings.hiddenFolders = v;
         await this.plugin.saveSettings();
