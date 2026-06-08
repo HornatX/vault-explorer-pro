@@ -4,7 +4,7 @@
 
 我在小红书发布了许多obsidian的教程和插件开发进度，你的关注就是对我最大的支持
 
-文件价文件折叠
+文件夹文件折叠
 <p align="center">
   <img src="assets/演示1.gif" alt="演示" />
 </p>
